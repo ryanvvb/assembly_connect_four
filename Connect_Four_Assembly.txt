@@ -1,0 +1,757 @@
+TITLE Connect_Four_Assembly
+;// Description: Model a console based game of connect four in x86 assembly language
+;// Name: Ryan Van Valkenburg
+;// Authored: 04.25.2021
+
+Include irvine32.inc
+
+
+DisplayMenu PROTO
+
+GameRules PROTO
+
+PrintBoard PROTO p_game_board : PTR BYTE, print_counter : BYTE
+
+Column_Input PROTO player_choice : PTR BYTE
+
+PlacePiece PROTO place_piece_board : PTR BYTE, curr_player_turn : BYTE, curr_input : BYTE
+
+SwapTurns PROTO player_turn : PTR BYTE
+
+RowCheck PROTO row_board : PTR BYTE, set_win : PTR BYTE, check_player : BYTE, row_len : BYTE
+
+ColumnCheck PROTO col_board : PTR BYTE, col_win : PTR BYTE, check_player_col : BYTE, col_len : BYTE
+
+Cross_Check PROTO cross_board : PTR BYTE, cross_win : PTR BYTE, cross_player : BYTE, cross_len : BYTE
+
+WINNER PROTO winning_player : BYTE
+
+DRAW_GAME PROTO
+
+NO_FUNCTION PROTO
+
+DisplayErrorMessage PROTO
+
+move EQU <mov>
+clearEAX TEXTEQU <mov eax, 0d>
+clearEBX TEXTEQU <mov ebx, 0d>
+clearECX TEXTEQU <mov ecx, 0d>
+clearEDX TEXTEQU <mov edx, 0d>
+setBLUEpiece TEXTEQU <mov eax, 1 + (1 * 16)> ;// Set the current text color to BLUE to place the blue piece
+setYELLOWpiece TEXTEQU <mov eax, 14 + (14 * 16)> ;// Set the current text color to YELLOW to place the yellow piece
+resetWHITEtext TEXTEQU <mov eax, 15 + (0 * 16)> ;// Set text to WHITE
+blankspace TEXTEQU <mov eax, 20h> ;// Move a space into eax to fill an empty board space
+
+.data
+
+
+.code
+DisplayMenu PROC
+;// ------------------------------------------------------------------------------------------------------------
+;// Prints the menu to the screen for the user to read
+;// Recieves: None
+;// Returns: String output to terminal
+;// Requres: WriteString from Irvine library
+;// ------------------------------------------------------------------------------------------------------------
+.data
+line1 BYTE "	1. Rules" , 0dh, 0ah, 0
+line2 BYTE "	2. Player vs Player" , 0dh, 0ah, 0
+line3 BYTE "	3. Player vs Computer" , 0dh, 0ah, 0
+line4 BYTE "	4. Computer vs Computer" , 0dh, 0ah, 0
+line5 BYTE " 	5. Display game record", 0dh, 0ah, 0
+line6 BYTE "	6. Exit",0ah,0dh,0
+line7 BYTE " ", 0dh, 0ah, 0
+line8 BYTE "Enter a number to select an option: ", 0
+
+.code
+call Clrscr
+mov edx, OFFSET line1
+call WriteString
+mov edx, OFFSET line2
+call WriteString
+mov edx, OFFSET line3
+call WriteString
+mov edx, OFFSET line4
+call WriteString
+mov edx, OFFSET line5
+call WriteString
+mov edx, OFFSET line6
+call WriteString
+mov edx, OFFSET line7
+call WriteString
+mov edx, OFFSET line8
+call WriteString
+ret
+DisplayMenu ENDP
+
+GameRules PROC
+;// ------------------------------------------------------------------------------------------------------------
+;// Prints the rules to the screen for the user to read
+;// Recieves: None
+;// Returns: String output to terminal
+;// Requres: WriteString from Irvine library
+;// ------------------------------------------------------------------------------------------------------------
+.data
+ruleString1 BYTE "The game board is composed of a 4 x 4 grid of slots for game pieces, players will take turns",0ah,0dh
+			BYTE "selecting a column numbered 0 - 3 to drop a game piece in.  The goal is to connect 3 game pieces",0ah,0dh
+			BYTE "of the same color in a row either vertically, horizontally, or diagonally.",0ah,0dh
+			BYTE "Try to connect 3 while also stopping your opponent from connecting 3.",0ah,0dh
+			BYTE "The player with the blue pieces will always go first",0ah,0dh,0
+
+.code
+mov edx, OFFSET ruleString1
+call WriteString
+call Crlf
+call WaitMsg
+call Crlf
+ret
+GameRules ENDP
+
+PrintBoard PROC p_game_board : PTR BYTE, print_counter : BYTE
+;// ------------------------------------------------------------------------------------------------------------
+;// Prints the game board to the screen
+;// Recieves: the address of the game board
+;// Returns: Game board visual output to terminal
+;// Requres: WriteString from Irvine library
+;// ------------------------------------------------------------------------------------------------------------
+LOCAL row : BYTE, column : BYTE
+.data
+board_divider BYTE "-----------------",0ah,0dh,0
+index_key BYTE "  0   1   2   3",0ah,0dh,0
+vert_divider TEXTEQU <mov al, '|'> ;// Move the | character into AL, this will divide each slot in the game board
+blue_piece BYTE " B ",0
+yellow_piece BYTE " Y ",0
+empty_space BYTE "   ",0
+
+.code
+
+push eax
+push edx
+push ecx
+push esi
+
+call Clrscr ;// Clear the screen to display a board on an empty background
+
+
+mov edx, OFFSET board_divider
+call WriteString
+mov row, 0 ;// Set initial row index
+movzx ecx, print_counter ;// set the counter to the size of the rows, board is 4x4
+
+DRAW_ROW_LOOP: ;// Loop through the game board in row major format
+	mov column, 0 ;// reset the column index at each iteration through the outer loop
+	mov esi, p_game_board ;// Point to the game board
+	clearEAX
+	mov al, row ;// al = row index
+	mov dl, print_counter ;// dl = length of the board
+	mul dl ;// multiply the current index by the length of the board to get the current address
+	add esi, eax ;// point to the first element of the row
+	vert_divider ;// Print the vertical divider character
+	call WriteChar
+	push ecx ;// Save ecx before entering inner loop
+	movzx ecx, print_counter
+	clearEDX
+
+		DRAW_COLUMN_LOOP:
+		movzx edx, column
+
+		mov eax, [esi + edx] ;// Point to the character at the specified index
+		cmp al, 0 ;// 0 indicates an empty board space
+		je DRAW_EMPTY_SPACE
+		cmp al, 1 ;// 1 is the piece of player 1 human
+		je DRAW_BLUE_PIECE
+		cmp al, 3 ;// 3 is the piece of player 1 cpu
+		je DRAW_BLUE_PIECE
+		cmp al, 2 ;// 2 is player 2 human
+		je DRAW_YELLOW_PIECE
+		cmp al, 4 ;// 4 is player 2 cpu
+		je DRAW_YELLOW_PIECE
+
+		POST_PIECE_PRINT:
+		add column, 1 ;// Increment column index
+
+		loop DRAW_COLUMN_LOOP
+	pop ecx
+	add row, 1
+	call Crlf
+	mov edx, OFFSET board_divider ;// Draw the divider of each row
+	call WriteString
+	loop DRAW_ROW_LOOP
+
+	jmp COMPLETE_BOARD
+
+DRAW_BLUE_PIECE:
+	setBLUEpiece
+	call SetTextColor
+	mov edx, OFFSET blue_piece
+	call WriteString
+	resetWHITEtext
+	call SetTextColor
+	vert_divider
+	call WriteChar
+	jmp POST_PIECE_PRINT
+
+DRAW_EMPTY_SPACE:
+	resetWHITEtext
+	call SetTextColor
+	mov edx, OFFSET empty_space
+	call WriteString
+	vert_divider
+	call WriteChar
+	jmp POST_PIECE_PRINT
+
+DRAW_YELLOW_PIECE:
+	setYELLOWpiece
+	call SetTextColor
+	mov edx, OFFSET yellow_piece
+	call WriteString
+	resetWHITEtext
+	call SetTextColor
+	vert_divider
+	call WriteChar
+	jmp POST_PIECE_PRINT
+
+COMPLETE_BOARD:
+	mov edx, OFFSET index_key
+	call WriteString
+
+call WaitMsg
+call Crlf
+pop esi
+pop ecx
+pop edx
+pop eax
+ret
+PrintBoard ENDP
+
+Column_Input PROC player_choice : PTR BYTE
+;// ------------------------------------------------------------------------------------------------------------
+;// Prompt user for input, which column to place a piece
+;// Recieves: current player designation, address of the board
+;// Returns: 
+;// Requres: 
+;// ------------------------------------------------------------------------------------------------------------
+.data
+which_column BYTE "Select a column to place a piece 0 - 3", 0ah, 0dh, 0
+.code
+push eax
+push edx
+push ecx
+
+call Crlf
+ASK_INPUT:
+mov edx, OFFSET which_column
+call WriteString
+call ReadInt
+cmp eax, 3
+ja CALL_ERROR
+cmp eax, 0
+jb CALL_ERROR
+jmp NO_ERROR
+
+CALL_ERROR: INVOKE DisplayErrorMessage
+jmp ASK_INPUT
+
+NO_ERROR:
+mov edx, player_choice
+mov [edx], al
+
+pop ecx
+pop edx
+pop eax
+ret
+Column_Input ENDP
+
+PlacePiece PROC place_piece_board : PTR BYTE, curr_player_turn : BYTE, curr_input : BYTE
+;// ------------------------------------------------------------------------------------------------------------
+;// Displays an error message when the user enters an invalud menu command
+;// Recieves: None
+;// Returns: String output to terminal
+;// Requres: WriteString from Irvine Library
+;// ------------------------------------------------------------------------------------------------------------
+LOCAL row : BYTE, column : BYTE
+
+push eax
+push edx
+push esi
+push ecx
+BEGIN_CHECK:
+row_size = 4
+column_size = 4
+mov ecx, column_size
+mov row, 3
+PLACE_PIECE_LOOP:
+	mov al, curr_input ;// the column will be the input from the user
+	mov column, al
+
+	mov esi, place_piece_board ;// Point to the game board
+	movzx eax, row
+	mov dl, row_size	
+	mul dl
+	add esi, eax ;// Point to the bottom row of the board
+	movzx edx, column ;// The indicated column will be stored in edx
+	mov eax, [esi + edx] ;// move the element at the specified index to eax
+	cmp al, 0
+	je PLACE
+	sub row, 1 ;// If the position is not empty, decrement the row
+	loop PLACE_PIECE_LOOP
+
+
+NO_ROOM:
+	INVOKE DisplayErrorMessage
+	INVOKE Column_Input, addr curr_input
+	jmp BEGIN_CHECK
+
+PLACE:
+
+	mov al, curr_player_turn
+	mov [esi + edx], al
+	
+OOR:
+
+pop ecx
+pop esi
+pop edx
+pop eax
+ret
+PlacePiece ENDP
+
+
+SwapTurns PROC player_turn : PTR BYTE
+push eax
+push edx
+push ecx
+
+mov edx, player_turn
+mov eax, [edx]
+cmp al, 1
+je P2
+cmp al, 2
+je P1
+
+P2:
+mov eax, 2
+mov [edx], al
+jmp DONE
+
+P1:
+mov eax, 1
+mov [edx], al
+jmp DONE
+
+DONE:
+
+pop ecx
+pop edx
+pop eax
+ret
+SwapTurns ENDP
+
+
+RowCheck PROC row_board: PTR BYTE, set_win : PTR BYTE, check_player : BYTE, row_len : BYTE
+;// ------------------------------------------------------------------------------------------------------------
+;// Check each row of the matrix for a winning set of pieces
+;// Recieves: Game board, winning check variable, the current player, the length of the rows
+;// Returns: Whether a game is won or not
+;// Requres: none
+;// ------------------------------------------------------------------------------------------------------------
+LOCAL row : BYTE, column : BYTE, previous_piece : BYTE, count : BYTE
+push eax
+push edx
+push ecx
+
+mov row, 0
+movzx ecx, row_len ;// Outer loop set to the size of the rows
+OUTER_LOOP:
+mov count, 0 ;// reset the counter to zero at the beginning of each loop to indicate a game winning set has not been met
+mov esi, row_board ;// point to the board
+mov eax, 0 ;// clear out eax
+mov al, row ;// set eax to the current row counter
+mov dl, row_len ;// move the size of the rows to dl, scale the pointer properly for row major checking
+mul dl
+add esi, eax ;// point to the proper row's first element
+mov column, 0 ;// reset the column counter
+push ecx ;// save the outer loop counter
+mov previous_piece, 0 ;// the previous piece is set to a clear space
+movzx ecx, row_len
+INNER_LOOP:
+movzx edx, column ;// column counter moved to edx
+mov eax, [esi + edx] ;// move the element at the specified row column index to eax
+cmp al, 0 ;// if the element is a zero there is no match
+je NO_MATCH
+mov bl, previous_piece ;// if the previous piece and the piece pointed to are the same there is a match
+mov al, check_player
+cmp al, bl
+jne NO_MATCH
+add count, 1 ;// counter is increased when a match is detected
+jmp ROW_MATCH
+NO_MATCH:
+mov count, 0
+ROW_MATCH:
+add column, 1 ;// increase the column counter
+loop INNER_LOOP ;// restart the inner loop
+pop ecx
+add row, 1 ;// increment the row counter
+cmp count, 3 ;// if the counter is less than 4 there is not a game winning set
+jb NO_WIN ;// jump to the no win condition, continue the outer loop
+mov edx, set_win ;// move the addres of the set win variable to edx
+mov al, check_player
+mov [edx], al ;// if a win condition has been detected the set win variable is set to the corresponding player number
+jmp GAME_WIN ;// break out of the loop
+NO_WIN:
+loop OUTER_LOOP
+
+GAME_WIN:
+
+pop ecx
+pop edx
+pop eax
+ret
+RowCheck ENDP
+
+
+ColumnCheck PROC col_board : PTR BYTE, col_win : PTR BYTE, check_player_col : BYTE, col_len : BYTE
+;// ------------------------------------------------------------------------------------------------------------
+;// Check each column of the matrix for a winning set of pieces
+;// Recieves: Game board, winning check variable, the current player, the length of the rows
+;// Returns: Whether a game is won or not
+;// Requres: none
+;// ------------------------------------------------------------------------------------------------------------
+LOCAL row : BYTE, column : BYTE, count : BYTE, previous_piece : BYTE
+push esi
+push ecx
+push eax
+push edx
+
+mov column, 0
+movzx ecx, col_len;// Set the outer loop counter to column size
+OUTER_LOOP:
+mov count, 0
+mov row, 0
+push ecx;// Save the loop counter before going into the inner loop
+movzx ecx, col_len ;// Set the inner loop to the length of the row
+INNER_LOOP:
+mov esi, col_board
+mov eax, 0
+mov al, row
+mov dl, col_len
+mul dl
+add esi, eax
+movzx edx, column
+mov eax, [esi + edx];// move the value at the specified row column index to eax
+cmp al, 0
+je NO_COL_MATCH
+mov bl, previous_piece
+cmp al, bl
+jne NO_COL_MATCH
+add count, 1
+jmp COL_MATCH
+NO_COL_MATCH:
+mov count, 0
+COL_MATCH:
+add row, 1;// Increment the row index counter
+loop INNER_LOOP
+pop ecx;// Restore ecx after the inner loop
+cmp count, 3
+jb NO_COL_WIN
+mov edx, col_win ;// column win variable address to edx
+mov al, check_player_col ;// current player number moved to al, win variable set to this player
+mov [edx], al
+jmp COLUMN_WIN
+NO_COL_WIN :
+add column, 1;// Increase the column index counter
+loop OUTER_LOOP
+
+COLUMN_WIN:
+
+pop edx
+pop eax
+pop ecx
+pop esi
+ret
+ColumnCheck ENDP
+
+
+Cross_Check PROC cross_board : PTR BYTE, cross_win : PTR BYTE, cross_player : BYTE, cross_len : BYTE
+;// ------------------------------------------------------------------------------------------------------------
+;// Check each diagonal of the matrix for a winning set of pieces
+;// Recieves: Game board, winning check variable, the current player, the length of the rows
+;// Returns: Whether a game is won or not
+;// Requres: none
+;// ------------------------------------------------------------------------------------------------------------
+LOCAL row_index : BYTE, column_index : BYTE, count : BYTE, previous_piece : BYTE
+push esi
+push ecx
+push eax
+push edx
+
+mov column_index, 0
+mov row_index, 0
+movzx ecx, cross_len
+mov count, 0
+mov previous_piece, 0
+LEFT_CHECK:
+	mov esi, cross_board
+	mov eax, 0
+	mov al, row_index
+	mov dl, cross_len
+	mul dl
+	add esi, eax
+	movzx edx, column_index
+	mov eax, [esi + edx];// Move the value at the specified index to eax
+	cmp al, 0
+	je NO_LEFT_MATCH
+	mov bl, previous_piece
+	cmp al, bl
+	jne NO_LEFT_MATCH
+	add count, 1
+	jmp LEFT_MATCH
+	NO_LEFT_MATCH:
+	mov count, 0
+	LEFT_MATCH:
+	add row_index, 1;// Increment the column index counter
+	add column_index, 1
+	loop LEFT_CHECK
+	
+cmp count, 3
+jae CROSS_WIN_GAME
+mov count, 0
+mov row_index, 0
+movzx ecx, cross_len
+RIGHT_CHECK:
+	sub column_index, 1
+	mov esi, cross_board
+	mov eax, 0
+	mov al, row_index
+	mov dl, cross_len
+	mul dl
+	add esi, eax
+	movzx edx, column_index
+	mov eax, [esi + edx];// Move the value at the specified index to eax
+	cmp al, 0
+	je NO_RIGHT_MATCH
+	mov bl, previous_piece
+	cmp al, bl
+	jne NO_RIGHT_MATCH
+	add count, 1
+	jmp RIGHT_MATCH
+	NO_RIGHT_MATCH:
+	mov count, 0
+	RIGHT_MATCH:
+	add row_index, 1;// Increment the column index counter
+	loop RIGHT_CHECK
+
+cmp count, 3
+jb NO_CROSS_WIN
+CROSS_WIN_GAME:
+mov edx, cross_win
+mov al, cross_player
+mov [edx], al
+
+NO_CROSS_WIN:
+
+pop edx
+pop eax
+pop ecx
+pop esi
+
+ret
+Cross_Check ENDP
+
+
+NO_FUNCTION PROC
+;// ------------------------------------------------------------------------------------------------------------
+;// Displays an error message when the user enters an invalud menu command
+;// Recieves: None
+;// Returns: String output to terminal
+;// Requres: WriteString from Irvine Library
+;// ------------------------------------------------------------------------------------------------------------
+.data
+no_func BYTE "Currently no functionality, check back later for future updates", 0ah, 0dh, 0
+
+.code
+push edx
+
+mov edx, offset no_func
+call WriteString
+call WaitMsg
+
+pop edx
+ret
+NO_FUNCTION ENDP
+
+WINNER PROC winning_player : BYTE
+.data
+blue_win BYTE "Congratulations, Blue wins!",0ah,0dh,0
+yellow_win BYTE "Congratulation, Yellow wins!",0ah,0dh,0
+.code
+mov al, winning_player
+cmp al, 1
+je BLUE_W
+cmp al, 2
+je YELLOW_W
+
+BLUE_W:
+mov edx, OFFSET blue_win
+call WriteString
+call WaitMsg
+jmp POST
+
+YELLOW_W:
+mov edx, OFFSET yellow_win
+call WriteString
+call WaitMsg
+jmp POST
+
+POST:
+ret
+WINNER ENDP
+
+
+DRAW_GAME PROC
+.data
+draw_str BYTE "Draw game",0ah,0dh,0
+
+.code
+mov edx, offset draw_str
+call WriteString
+call WaitMsg
+
+ret
+DRAW_GAME ENDP
+
+
+
+DisplayErrorMessage PROC
+;// ------------------------------------------------------------------------------------------------------------
+;// Displays an error message when the user enters an invalud menu command
+;// Recieves: None
+;// Returns: String output to terminal
+;// Requres: WriteString from Irvine Library
+;// ------------------------------------------------------------------------------------------------------------
+.data
+ErrorString BYTE "Invalid input, enter a valid integer", 0dh, 0ah, 0
+.code
+push edx; save EDX
+mov edx, OFFSET ErrorString ;// move the offset of the error message to EDX to print
+call WriteString ;// print the error message to the screen
+call WaitMsg ;// allow the user to read the message until they press a key
+call Crlf
+pop edx ;// restore EDX
+ret
+DisplayErrorMessage ENDP
+
+
+main PROC
+.data
+game_board BYTE 4 DUP(0) ;// 4x4 game board row major 2d array
+RowSize = ($ - game_board)
+		   BYTE 4 DUP(0)
+		   BYTE 4 DUP(0)
+		   BYTE 4 DUP(0)
+		   
+current_player BYTE 0 ;// Keep track of the current player (1 and 2 are human players, 3 and 4 are computer players)
+					  ;// Player 1 and 3 will always be BLUE, 2 and 4 will always be YELLOW
+bool_win BYTE 0
+player1_record BYTE 3 DUP(0) ;// Keep track of the win, loss, draw record of player 1
+current_player_choice BYTE 0
+max_turns BYTE 0
+blue_turn BYTE "Blue player, please select your column",0ah,0dh,0
+yellow_turn BYTE "Yellow player, please select your column",0ah,0dh,0
+
+.code
+call Randomize
+cleareax; eax = 0
+clearebx; ebx = 0
+clearecx; ecx = 0
+clearedx; edx = 0
+
+BEGIN_MENU: INVOKE DisplayMenu ;// write the menu to the screen for the user to interface with
+
+call ReadInt ;// Read a user input and compare against corresponding menu options
+cmp eax, 1
+je PROC_1
+cmp eax, 2
+je PROC_2
+cmp eax, 3
+je PROC_3
+cmp eax, 4
+je PROC_4
+cmp eax, 5
+je PROC_5
+cmp eax, 6
+je PROC_6
+INVOKE DisplayErrorMessage
+jmp BEGIN_MENU;// if the proper input is not selected, the menu is reset and the user is asked for another input
+
+PROC_1:
+INVOKE GameRules
+jmp BEGIN_MENU ;// when the procedure returns the menu will be reprinted and the user can select another option
+
+PROC_2:;// This acts as the game driver
+INVOKE GameRules
+INVOKE PrintBoard, addr game_board, RowSize
+mov current_player, 1
+mov max_turns, 16
+movzx ecx, max_turns
+GAME_LOOP:
+mov al, current_player ;// move current player to al
+cmp al, 1
+je ASK_BLUE
+cmp al, 2
+je ASK_YELLOW
+GAME_INPUT:
+INVOKE Column_Input, addr current_player_choice
+INVOKE PlacePiece, addr game_board, current_player, current_player_choice
+INVOKE PrintBoard, addr game_board, RowSize
+INVOKE RowCheck, addr game_board, addr bool_win, current_player, RowSize
+cmp bool_win, 0
+jne GAME_OVER
+INVOKE ColumnCheck, addr game_board, addr bool_win, current_player, RowSize
+cmp bool_win, 0
+jne GAME_OVER
+INVOKE Cross_Check, addr game_board, addr bool_win, current_player, RowSize
+cmp bool_win, 0
+jne GAME_OVER
+INVOKE SwapTurns, addr current_player
+
+cmp ecx, 0
+je DRAW
+jmp GAME_LOOP
+
+
+
+ASK_BLUE:
+mov edx, OFFSET blue_turn
+call WriteString
+jmp GAME_INPUT
+
+ASK_YELLOW:
+mov edx, OFFSET yellow_turn
+call WriteString
+jmp GAME_INPUT
+
+GAME_OVER:
+INVOKE WINNER, current_player
+jmp POST_GAME
+DRAW:
+INVOKE DRAW_GAME
+POST_GAME:
+jmp BEGIN_MENU;
+
+PROC_3:
+INVOKE NO_FUNCTION
+jmp BEGIN_MENU;
+
+PROC_4: 
+INVOKE NO_FUNCTION
+jmp BEGIN_MENU
+
+PROC_5:
+INVOKE NO_FUNCTION
+jmp BEGIN_MENU
+
+PROC_6: exit
+
+main ENDP
+END main
